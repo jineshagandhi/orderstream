@@ -21,3 +21,5 @@ services:
         value: INFO
       - key: APP_PORT
         value: "8000"
+      - key: DEMO_MODE
+        value: "true"            # background traffic generator on the deployed instance

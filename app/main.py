@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from .broker import SSEBroker
 from .cohesion import CohesionBuffer
 from .config import get_settings
 from .db import close_client, ensure_indexes, get_client, get_db
+from .demo import DemoSimulator
 from .event_spine import EventSpine
 from .health import HEALTH, periodic_health_emitter
 from .routes import admin, audit, events, health, orders, snapshot, stream, ws
@@ -82,11 +84,18 @@ async def lifespan(app: FastAPI):
 
     health_task = asyncio.create_task(periodic_health_emitter(broker, settings.health_event_interval))
 
+    demo: DemoSimulator | None = None
+    if os.environ.get("DEMO_MODE", "").lower() in ("true", "1", "yes", "on"):
+        demo = DemoSimulator(db)
+        await demo.start()
+        log.info("demo_mode_enabled — background traffic generator running")
+
     app.state.db = db
     app.state.broker = broker
     app.state.spine = spine
     app.state.cohesion = cohesion
     app.state.watcher = watcher
+    app.state.demo = demo
 
     log.info("orderstream ready on http://%s:%d", settings.app_host, settings.app_port)
 
@@ -94,6 +103,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         log.info("shutting down orderstream")
+        if demo is not None:
+            await demo.stop()
         health_task.cancel()
         await watcher.stop()
         await cohesion.flush_all()

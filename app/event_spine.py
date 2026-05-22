@@ -40,6 +40,7 @@ from datetime import date, datetime, time, timezone
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import DuplicateKeyError
 
 from .config import get_settings
 from .db import EVENT_LOG
@@ -124,10 +125,22 @@ class EventSpine:
 
     async def bootstrap(self) -> None:
         """Load the chain tail from the database on startup."""
+        await self._refresh_head()
+
+    async def _refresh_head(self) -> None:
+        """Read the authoritative chain tail from MongoDB.
+
+        Called on bootstrap and whenever an in-memory/Mongo mismatch is
+        detected (e.g. DuplicateKeyError on insert) so the next append
+        builds on the true latest event.
+        """
         last = await self.col.find_one(sort=[("seq", -1)])
         if last:
             self._last_hash = last["hash"]
             self._last_seq = int(last["seq"])
+        else:
+            self._last_hash = get_settings().audit_genesis_hash
+            self._last_seq = 0
 
     async def append(
         self,
@@ -144,69 +157,81 @@ class EventSpine:
         correlation_id: str | None = None,
     ) -> Event:
         async with self._lock:
-            self._last_seq += 1
-            seq = self._last_seq
-            prev_hash = self._last_hash
-            ts = datetime.now(timezone.utc)
-            event_id = str(uuid.uuid4())
+            for attempt in range(5):
+                self._last_seq += 1
+                seq = self._last_seq
+                prev_hash = self._last_hash
+                ts = datetime.now(timezone.utc)
+                event_id = str(uuid.uuid4())
 
-            # Canonicalize ALL dynamic fields up front. After this step,
-            # there are no datetime/UUID/bytes left anywhere — only the
-            # plain JSON primitive types Mongo stores and returns identically.
-            canon_before = _to_canonical(before)
-            canon_after = _to_canonical(after)
-            canon_diff = [_to_canonical(d.model_dump()) for d in diff]
+                # Canonicalize ALL dynamic fields up front. After this step,
+                # there are no datetime/UUID/bytes left anywhere — only the
+                # plain JSON primitive types Mongo stores and returns identically.
+                canon_before = _to_canonical(before)
+                canon_after = _to_canonical(after)
+                canon_diff = [_to_canonical(d.model_dump()) for d in diff]
 
-            payload_for_hash = {
-                "event_id": event_id,
-                "seq": seq,
-                "op": op,
-                "intent": intent.value,
-                "priority": priority.value,
-                "order_id": order_id,
-                "diff": canon_diff,
-                "before": canon_before,
-                "after": canon_after,
-                "ts": ts.isoformat(),
-                "schema_version": 1,
-                "correlation_id": correlation_id,
-            }
-            h = compute_hash(prev_hash, payload_for_hash)
+                payload_for_hash = {
+                    "event_id": event_id,
+                    "seq": seq,
+                    "op": op,
+                    "intent": intent.value,
+                    "priority": priority.value,
+                    "order_id": order_id,
+                    "diff": canon_diff,
+                    "before": canon_before,
+                    "after": canon_after,
+                    "ts": ts.isoformat(),
+                    "schema_version": 1,
+                    "correlation_id": correlation_id,
+                }
+                h = compute_hash(prev_hash, payload_for_hash)
 
-            # Storage document: the hashed fields verbatim + auxiliary metadata.
-            # No Pydantic serialization. No surprise conversions. What we hashed
-            # is exactly what we store.
-            storage_doc: dict[str, Any] = dict(payload_for_hash)
-            storage_doc.update({
-                "resume_token": _to_canonical(resume_token),
-                "cluster_time": _to_canonical(cluster_time),
-                "coalesced": False,
-                "coalesced_count": 1,
-                "prev_hash": prev_hash,
-                "hash": h,
-            })
-            await self.col.insert_one(storage_doc)
+                storage_doc: dict[str, Any] = dict(payload_for_hash)
+                storage_doc.update({
+                    "resume_token": _to_canonical(resume_token),
+                    "cluster_time": _to_canonical(cluster_time),
+                    "coalesced": False,
+                    "coalesced_count": 1,
+                    "prev_hash": prev_hash,
+                    "hash": h,
+                })
 
-            event = Event(
-                event_id=event_id,
-                seq=seq,
-                op=op,  # type: ignore[arg-type]
-                intent=intent,
-                priority=priority,
-                order_id=order_id,
-                diff=[DiffEntry(**d) for d in canon_diff],
-                before=canon_before,
-                after=canon_after,
-                ts=ts,
-                resume_token=resume_token,
-                cluster_time=cluster_time,
-                correlation_id=correlation_id,
-                prev_hash=prev_hash,
-                hash=h,
-            )
+                try:
+                    await self.col.insert_one(storage_doc)
+                except DuplicateKeyError:
+                    # Self-heal: our in-memory tail diverged from MongoDB
+                    # (e.g. out-of-band DB modification, deploy overlap).
+                    # Re-read the true tail and try again with a fresh seq.
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "spine_seq_conflict_retrying", extra={"attempted_seq": seq, "attempt": attempt + 1}
+                    )
+                    await self._refresh_head()
+                    continue
 
-            self._last_hash = h
-            return event
+                event = Event(
+                    event_id=event_id,
+                    seq=seq,
+                    op=op,  # type: ignore[arg-type]
+                    intent=intent,
+                    priority=priority,
+                    order_id=order_id,
+                    diff=[DiffEntry(**d) for d in canon_diff],
+                    before=canon_before,
+                    after=canon_after,
+                    ts=ts,
+                    resume_token=resume_token,
+                    cluster_time=cluster_time,
+                    correlation_id=correlation_id,
+                    prev_hash=prev_hash,
+                    hash=h,
+                )
+
+                self._last_hash = h
+                return event
+
+            raise RuntimeError("event spine append failed after 5 retries")
 
     async def replay_since(self, *, seq: int | None = None, event_id: str | None = None, limit: int = 1000) -> list[dict[str, Any]]:
         query: dict[str, Any] = {}

@@ -1,0 +1,23 @@
+# One-click deployment to Render (https://render.com)
+# Connect this repo at https://dashboard.render.com/select-repo?type=blueprint
+# and Render will pick up this file automatically.
+#
+# Pair this with a free MongoDB Atlas cluster — set MONGO_URI in the
+# Render dashboard after the service is created.
+
+services:
+  - type: web
+    name: orderstream
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: MONGO_URI
+        sync: false           # set in Render dashboard (Atlas connection string)
+      - key: MONGO_DB
+        value: orderstream
+      - key: LOG_LEVEL
+        value: INFO
+      - key: APP_PORT
+        value: "8000"

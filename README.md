@@ -10,8 +10,7 @@ MongoDB Change Streams → field-level diff → intent classification → tamper
 Built for the Apt Interview Assignment (Atypical Technologies Pvt Ltd).
 
 > 📺 **Live demo:** **https://orderstream.onrender.com** — click "Verify chain" to see cryptographic audit verification on a live, continuously-running instance
-> 🎥 **Demo video / GIF:** *(add a 30-second screen recording here if time permits)*
->
+> 
 > *Note on the free tier: the Render service sleeps after 15 minutes of inactivity. First request after sleep takes 30–60 seconds to wake up — subsequent requests are instant. This is a free-tier behavior, not a system characteristic.*
 
 > Naive real-time systems tell clients *something* changed.

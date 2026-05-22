@@ -40,7 +40,7 @@ orderstream — a real-time, audit-grade order event spine for high-throughput o
      failure-modes catalogue with 12 named scenarios and design responses.
 
 GitHub:    https://github.com/jineshagandhi/orderstream
-Live demo: <paste your Render URL here>
+Live demo: https://orderstream.onrender.com
 Resume:    attached
 
 I chose Python + FastAPI + MongoDB + SSE (with parallel WebSocket) for
@@ -75,7 +75,7 @@ Drop this into the Projects section above FreelanceFlow:
 \textbf{orderstream — Real-Time, Audit-Grade Order Event Spine}
 \hfill \textit{Python, FastAPI, MongoDB Change Streams, SSE/WebSocket, Docker}
 \hfill \href{https://github.com/jineshagandhi/orderstream}{GitHub}
-\hfill \href{<RENDER_URL>}{Live}
+\hfill \href{https://orderstream.onrender.com}{Live}
 \hfill 2026
 
 \begin{itemize}[leftmargin=*]
@@ -141,7 +141,7 @@ APT-specific concerns:
                                   Firebase, Supabase, Pusher
 
 GitHub:     https://github.com/jineshagandhi/orderstream
-Live demo:  <paste Render URL>
+Live demo:  https://orderstream.onrender.com
 Tests:      23 passing in GitHub Actions CI
 Stack:      Python 3.11 + FastAPI + Motor + Pydantic v2 + MongoDB rs0
 ```
